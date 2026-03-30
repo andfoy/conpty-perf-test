@@ -72,17 +72,22 @@ struct Stats {
     pub mb_per_second: f64,
     pub mean_chars_per_read: f64,
     pub max_chars_per_read: usize,
-    pub median_chars_per_read: usize
+    pub median_chars_per_read: usize,
 }
 
 impl Stats {
     fn compute_stats(&mut self) {
         self.chars_per_second = self.total_chars as f64 / self.elapsed_seconds.as_secs_f64();
-        self.mb_per_second = (self.total_bytes as f64 / self.elapsed_seconds.as_secs_f64()) / 1024.0 / 1024.0;
+        self.mb_per_second =
+            (self.total_bytes as f64 / self.elapsed_seconds.as_secs_f64()) / 1024.0 / 1024.0;
 
         let sum: usize = self.read_sizes.iter().sum();
         let len = self.read_sizes.len();
-        self.mean_chars_per_read = if len > 0 { sum as f64 / len as f64 } else { 0.0 };
+        self.mean_chars_per_read = if len > 0 {
+            sum as f64 / len as f64
+        } else {
+            0.0
+        };
         self.max_chars_per_read = self.read_sizes.iter().fold(0, |a, &b| a.max(b));
 
         let mut sorted_sizes = self.read_sizes.clone();
@@ -96,7 +101,6 @@ impl Stats {
         };
     }
 }
-
 
 fn create_file(path: PathBuf, num_lines: i32) {
     let mut left_block = String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
@@ -154,18 +158,12 @@ fn build_command(producer: Producer, path: PathBuf) -> (OsString, OsString) {
                 OsString::from(cmd_loc.to_str().unwrap()),
                 OsString::from(args),
             )
-        },
+        }
         Producer::Python => {
-            let script = r#"
-import shutil
-import sys
-
-with open(sys.argv[1], "rb") as f:
-    shutil.copyfileobj(f, sys.stdout.buffer)
-            "#;
+            let script = "\"import shutil\nimport sys\nwith open(sys.argv[1], 'rb') as f:\n    shutil.copyfileobj(f, sys.stdout.buffer)\"";
 
             let python = find_executable_in_path("python").unwrap();
-            let args = format!("-u -c {:?} {}", script,  path.to_str().unwrap());
+            let args = format!("-u -c {} {}", script, path.to_str().unwrap());
             (
                 OsString::from(python.to_str().unwrap()),
                 OsString::from(args),
@@ -190,11 +188,9 @@ fn drain_after_exit(pty: &mut PTY, stats: &mut Stats) {
                 stats.reached_eof = true;
                 stats.drain_time_out = false;
                 break;
-            },
-            Ok(false) => {
-
-            },
-            Err(err) => panic!("{:?}", err)
+            }
+            Ok(false) => {}
+            Err(err) => panic!("{:?}", err),
         }
 
         match pty.read(false) {
@@ -207,7 +203,7 @@ fn drain_after_exit(pty: &mut PTY, stats: &mut Stats) {
                             break;
                         }
                         sleep(Duration::from_millis(10));
-                    },
+                    }
                     false => {
                         // println!("{:?}", out);
                         accumulate_output(out, stats);
@@ -215,34 +211,37 @@ fn drain_after_exit(pty: &mut PTY, stats: &mut Stats) {
                         continue;
                     }
                 }
-            },
-            Err(_) => {
-                match pty.is_eof() {
-                    Ok(true) => {
-                        stats.reached_eof = true;
-                        stats.drain_time_out = false;
-                        break;
-                    },
-                    Ok(false) => {
-                        if Instant::now() - start >= deadline {
-                            stats.reached_eof = false;
-                            stats.drain_time_out = true;
-                            break;
-                        }
-                        sleep(Duration::from_millis(10));
-                        continue;
-                    },
-                    Err(err) => {
-                        panic!("{:?}", err);
-                    }
-                }
             }
+            Err(_) => match pty.is_eof() {
+                Ok(true) => {
+                    stats.reached_eof = true;
+                    stats.drain_time_out = false;
+                    break;
+                }
+                Ok(false) => {
+                    if Instant::now() - start >= deadline {
+                        stats.reached_eof = false;
+                        stats.drain_time_out = true;
+                        break;
+                    }
+                    sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(err) => {
+                    panic!("{:?}", err);
+                }
+            },
         }
     }
-
 }
 
-fn measure_pty(appname: OsString, cmdline: Option<OsString>, cols: i32, rows: i32, stats: &mut Stats) {
+fn measure_pty(
+    appname: OsString,
+    cmdline: Option<OsString>,
+    cols: i32,
+    rows: i32,
+    stats: &mut Stats,
+) {
     let mut pty_args = PTYArgs::default();
     pty_args.cols = cols;
     pty_args.rows = rows;
@@ -257,7 +256,7 @@ fn measure_pty(appname: OsString, cmdline: Option<OsString>, cols: i32, rows: i3
         let output = pty.read(true);
         match output {
             Ok(out) => {
-                // println!("{:?}", out);
+                println!("{:?}", out);
                 match out.is_empty() {
                     true => {
                         if pty.is_eof().unwrap() {
@@ -270,27 +269,25 @@ fn measure_pty(appname: OsString, cmdline: Option<OsString>, cols: i32, rows: i3
                             Some(_) => {
                                 drain_after_exit(&mut pty, stats);
                                 break;
-                            },
+                            }
                             None => {
                                 continue;
                             }
                         }
-                    },
+                    }
                     false => {
                         accumulate_output(out, stats);
                     }
                 }
-            },
+            }
             Err(err) => {
                 stats.exitstatus = pty.get_exitstatus().unwrap();
                 match (pty.is_eof(), stats.exitstatus) {
                     (Ok(true), _) => {
                         stats.reached_eof = true;
                         break;
-                    },
-                    (Ok(false), Some(_)) => {
-
-                    },
+                    }
+                    (Ok(false), Some(_)) => {}
                     (Ok(false), None) => {
                         break;
                     }
@@ -298,13 +295,11 @@ fn measure_pty(appname: OsString, cmdline: Option<OsString>, cols: i32, rows: i3
                         panic!("{:?}", err);
                     }
                 }
-
             }
         }
     }
 
     stats.elapsed_seconds = Instant::now() - start;
-
 }
 
 fn main() {
